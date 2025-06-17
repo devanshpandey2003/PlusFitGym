@@ -1,0 +1,100 @@
+version: '3.8'
+
+services:
+  # PulseFit Web Application
+  pulsefit-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - NEXT_TELEMETRY_DISABLED=1
+      # Neon Database Configuration
+      - DATABASE_URL=postgresql://neondb_owner:npg_j9e2mAQoVGNg@ep-super-sunset-a19zzjx2-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require
+      - POSTGRES_URL=postgresql://neondb_owner:npg_j9e2mAQoVGNg@ep-super-sunset-a19zzjx2-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require
+      - POSTGRES_PRISMA_URL=postgresql://neondb_owner:npg_j9e2mAQoVGNg@ep-super-sunset-a19zzjx2-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require
+      - DATABASE_URL_UNPOOLED=postgresql://neondb_owner:npg_j9e2mAQoVGNg@ep-super-sunset-a19zzjx2-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require
+      - POSTGRES_URL_NON_POOLING=postgresql://neondb_owner:npg_j9e2mAQoVGNg@ep-super-sunset-a19zzjx2-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require
+      - PGHOST=ep-super-sunset-a19zzjx2-pooler.ap-southeast-1.aws.neon.tech
+      - POSTGRES_USER=neondb_owner
+      - POSTGRES_PASSWORD=npg_j9e2mAQoVGNg
+      - POSTGRES_DATABASE=neondb
+      - PGPASSWORD=npg_j9e2mAQoVGNg
+      - PGDATABASE=neondb
+      - PGUSER=neondb_owner
+      - POSTGRES_HOST=ep-super-sunset-a19zzjx2-pooler.ap-southeast-1.aws.neon.tech
+      - NEON_PROJECT_ID=ep-super-sunset-a19zzjx2
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - pulsefit-network
+    command: sh -c "npm run db:init && npm start"
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_DB=pulsefit
+      - POSTGRES_USER=pulsefit_user
+      - POSTGRES_PASSWORD=pulsefit_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/backup:/backup
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pulsefit_user -d pulsefit"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - pulsefit-network
+
+  # Redis for caching (Optional)
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - pulsefit-network
+
+  # Database backup service
+  db-backup:
+    image: postgres:15-alpine
+    depends_on:
+      - postgres
+    environment:
+      - PGPASSWORD=pulsefit_password
+    volumes:
+      - ./scripts/backup:/backup
+    command: >
+      sh -c "
+        while true; do
+          sleep 86400
+          pg_dump -h postgres -U pulsefit_user -d pulsefit > /backup/pulsefit-$$(date +%Y%m%d-%H%M%S).sql
+          find /backup -name '*.sql' -mtime +7 -delete
+        done
+      "
+    networks:
+      - pulsefit-network
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  pulsefit-network:
+    driver: bridge
